@@ -3,6 +3,8 @@ import os
 import re
 from html import unescape
 from datetime import datetime
+import json
+from push_to_github import get_or_create_repo, push_files_to_repo
 
 def fetch_codeforces_solutions(handle):
     url = f'https://codeforces.com/api/user.status?handle={handle}'
@@ -66,7 +68,20 @@ def fetch_codeforces_solutions(handle):
                 sanitized_problem_name = re.sub(r'[\\/*?:"<>|]', "", problem_name)
                 filename = f"{sanitized_problem_name.replace(' ', '_')}{extension}"
                 submission_time = datetime.utcfromtimestamp(submission['creationTimeSeconds']).strftime('%Y-%m-%d %H:%M:%S')
-                accepted_solutions.append((submission['id'], filename, submission['contestId'], submission_time, submission['creationTimeSeconds']))
+                accepted_solutions.append({
+                    'submission_id': submission['id'],
+                    'filename': filename,
+                    'contest_id': submission['contestId'],
+                    'submission_time': submission_time,
+                    'submission_timestamp': submission['creationTimeSeconds'],
+                    'problem_name': problem_name,
+                    'problem_url': f"https://codeforces.com/contest/{submission['contestId']}/problem/{submission['problem']['index']}",
+                    'submission_url': f"https://codeforces.com/contest/{submission['contestId']}/submission/{submission['id']}",
+                    'tags': submission['problem'].get('tags', []),
+                    'language': submission['programmingLanguage'],
+                    'platform': 'Codeforces',
+                    'problem_index': submission['problem']['index']
+                })
     else:
         print(f"Error fetching data: {response['comment']}")
     
@@ -75,8 +90,23 @@ def fetch_codeforces_solutions(handle):
 def save_solutions_to_disk(solutions, handle):
     if not os.path.exists(handle):
         os.makedirs(handle)
+
+    submissions_data = {}
     
-    for submission_id, filename, contest_id, submission_time, submission_timestamp in solutions:
+    for solution in solutions:
+        submission_id = solution['submission_id']
+        filename = solution['filename']
+        submission_time = solution['submission_time']
+        submission_timestamp = solution['submission_timestamp']
+        problem_name = solution['problem_name']
+        problem_url = solution['problem_url']
+        submission_url = solution['submission_url']
+        tags = solution['tags']
+        language = solution['language']
+        platform = solution['platform']
+        problem_index = solution['problem_index']
+        contest_id = solution['contest_id']
+
         solution_url = f'https://codeforces.com/contest/{contest_id}/submission/{submission_id}'
         solution_page = requests.get(solution_url).text
         solution_start = solution_page.find('<pre id="program-source-text" class="prettyprint') + len('<pre id="program-source-text" class="prettyprint')
@@ -95,10 +125,37 @@ def save_solutions_to_disk(solutions, handle):
         # Update the file's modification time to match the submission time
         os.utime(file_path, (submission_timestamp, submission_timestamp))
 
+        # Prepare data for submissions.json
+        submissions_data[submission_id] = {
+            'contest_id': contest_id,
+            'language': language,
+            'path': file_path,
+            'platform': platform,
+            'problem_index': problem_index,
+            'problem_name': problem_name,
+            'problem_url': problem_url,
+            'submission_id': submission_id,
+            'submission_url': submission_url,
+            'tags': tags,
+            'timestamp': submission_time
+        }
+    
+    # Save submissions data to submissions.json
+    with open(os.path.join(handle, 'submissions.json'), 'w', encoding='utf-8') as json_file:
+        json.dump(submissions_data, json_file, indent=4)
+        print(f"Saved submissions metadata to submissions.json")
+
 if __name__ == "__main__":
     cf_handle = input("Enter your Codeforces handle: ")
     
     solutions = fetch_codeforces_solutions(cf_handle)
     save_solutions_to_disk(solutions, cf_handle)
     
-    print(f"Solutions from {cf_handle} have been saved to the local disk.")
+    github_username = input("Enter your GitHub username: ")
+    github_token = input("Enter your GitHub access token: ")
+    repo_name = input("Enter the name of the GitHub repository to create or push to: ")
+    
+    repo = get_or_create_repo(github_username, github_token, repo_name)
+    push_files_to_repo(repo, cf_handle)
+    
+    print(f"Solutions from {cf_handle} have been saved to the local disk and pushed to the GitHub repository {repo_name}.")
