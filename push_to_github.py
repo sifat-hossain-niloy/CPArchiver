@@ -1,5 +1,7 @@
 import os
-from github import Github, GithubException
+from github import Github, GithubException, InputGitAuthor
+from datetime import datetime
+import json
 
 def get_or_create_repo(username, token, repo_name):
     # Authenticate to GitHub
@@ -21,31 +23,37 @@ def get_or_create_repo(username, token, repo_name):
     return repo
 
 def push_files_to_repo(repo, directory):
-    for root, _, files in os.walk(directory):
-        for file in files:
-            file_path = os.path.join(root, file)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                path_in_repo = os.path.relpath(file_path, directory)
-                try:
-                    # Check if the file already exists in the repo
-                    repo.get_contents(path_in_repo)
-                    print(f"File {file} already exists in the repository. Skipping.")
-                except GithubException as e:
-                    if e.status == 404:
-                        # Create the file if it does not exist
-                        repo.create_file(path_in_repo, f"Add {file}", content)
-                        print(f"Added {file} to repository.")
-                    else:
-                        raise e
+    with open(os.path.join(directory, 'submissions.json'), 'r', encoding='utf-8') as json_file:
+        submissions_data = json.load(json_file)
 
-if __name__ == "__main__":
-    github_username = input("Enter your GitHub username: ")
-    github_token = input("Enter your GitHub access token: ")
-    repo_name = input("Enter the name of the GitHub repository to create or push to: ")
-    local_directory = input("Enter the local directory containing the files to push: ")
-    
-    repo = get_or_create_repo(github_username, github_token, repo_name)
-    push_files_to_repo(repo, local_directory)
-    
-    print(f"Files from {local_directory} have been pushed to the GitHub repository {repo_name}.")
+    for submission_id, data in submissions_data.items():
+        filename = data['path']
+        file_path = os.path.join(directory, filename)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            path_in_repo = filename
+            commit_date = datetime.strptime(data['timestamp'], '%Y-%m-%d %H:%M:%S')
+
+            author = InputGitAuthor(
+                name='Md Sifat Hossain',
+                email='sifatb910@gmail.com',
+                date=commit_date.isoformat() + 'Z'
+            )
+
+            try:
+                # Check if the file already exists in the repo
+                repo.get_contents(path_in_repo)
+                print(f"File {filename} already exists in the repository. Skipping.")
+            except GithubException as e:
+                if e.status == 404:
+                    # Create the file if it does not exist
+                    repo.create_file(
+                        path_in_repo,
+                        f"Add {data['problem_name']} solution submitted at {data['timestamp']}",
+                        content,
+                        committer=author,
+                        author=author
+                    )
+                    print(f"Added {filename} to repository.")
+                else:
+                    raise e

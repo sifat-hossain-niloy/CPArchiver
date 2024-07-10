@@ -2,17 +2,27 @@ import requests
 import os
 import re
 from html import unescape
-from datetime import datetime
+from datetime import datetime,timezone
 import json
 from push_to_github import get_or_create_repo, push_files_to_repo
 
 def fetch_codeforces_solutions(handle):
     url = f'https://codeforces.com/api/user.status?handle={handle}'
-    response = requests.get(url).json()
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an HTTPError for bad responses (4xx and 5xx)
+        data = response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data from Codeforces: {e}")
+        return []
+    except json.JSONDecodeError:
+        print("Error decoding JSON response from Codeforces")
+        return []
+
     accepted_solutions = []
 
-    if response['status'] == 'OK':
-        for submission in response['result']:
+    if data['status'] == 'OK':
+        for submission in data['result']:
             if submission['verdict'] == 'OK':
                 problem_name = submission['problem']['name']
                 programming_language = submission['programmingLanguage'].lower()
@@ -67,7 +77,8 @@ def fetch_codeforces_solutions(handle):
 
                 sanitized_problem_name = re.sub(r'[\\/*?:"<>|]', "", problem_name)
                 filename = f"{sanitized_problem_name.replace(' ', '_')}{extension}"
-                submission_time = datetime.utcfromtimestamp(submission['creationTimeSeconds']).strftime('%Y-%m-%d %H:%M:%S')
+                submission_time = datetime.fromtimestamp(submission['creationTimeSeconds'], tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
                 accepted_solutions.append({
                     'submission_id': submission['id'],
                     'filename': filename,
@@ -83,7 +94,7 @@ def fetch_codeforces_solutions(handle):
                     'problem_index': submission['problem']['index']
                 })
     else:
-        print(f"Error fetching data: {response['comment']}")
+        print(f"Error in API response: {data['comment']}")
     
     return accepted_solutions
 
@@ -129,7 +140,7 @@ def save_solutions_to_disk(solutions, handle):
         submissions_data[submission_id] = {
             'contest_id': contest_id,
             'language': language,
-            'path': file_path,
+            'path': filename,  # Only filename, not the full path
             'platform': platform,
             'problem_index': problem_index,
             'problem_name': problem_name,
@@ -146,14 +157,18 @@ def save_solutions_to_disk(solutions, handle):
         print(f"Saved submissions metadata to submissions.json")
 
 if __name__ == "__main__":
-    cf_handle = input("Enter your Codeforces handle: ")
+    # cf_handle = input("Enter your Codeforces handle: ")
+    cf_handle = "tanzina_taher"
     
     solutions = fetch_codeforces_solutions(cf_handle)
     save_solutions_to_disk(solutions, cf_handle)
     
-    github_username = input("Enter your GitHub username: ")
-    github_token = input("Enter your GitHub access token: ")
-    repo_name = input("Enter the name of the GitHub repository to create or push to: ")
+    # github_username = input("Enter your GitHub username: ")
+    github_username = "sifat-hossain-niloy"
+    # github_token = input("Enter your GitHub access token: ")
+    github_token = "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"
+    # repo_name = input("Enter the name of the GitHub repository to create or push to: ")
+    repo_name = "demo67"
     
     repo = get_or_create_repo(github_username, github_token, repo_name)
     push_files_to_repo(repo, cf_handle)
